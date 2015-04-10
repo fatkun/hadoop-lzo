@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -66,11 +67,24 @@ import com.hadoop.compression.lzo.LzopCodec;
 @SuppressWarnings("deprecation")
 public class DeprecatedLzoTextInputFormat extends TextInputFormat {
 //  private final Map<Path, LzoIndex> indexes = new HashMap<Path, LzoIndex>();
+	
+	public class MaxSizeHashMap<K, V> extends LinkedHashMap<K, V> {
+		private final int maxSize;
+
+		public MaxSizeHashMap(int maxSize) {
+			this.maxSize = maxSize;
+		}
+
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+			return size() > maxSize;
+		}
+	}
   
 	// ±‹√‚∂‡œﬂ≥ÃÀ¿À¯
 	private final ThreadLocal<Map<Path, LzoIndex>> indexes = new ThreadLocal() {
 		protected Map<Path, LzoIndex> initialValue() {
-			return new HashMap();
+			return new MaxSizeHashMap(500);
 		}
 	};
 
@@ -95,26 +109,35 @@ public class DeprecatedLzoTextInputFormat extends TextInputFormat {
           it.remove();
         }
       } else {
-        FileSystem fs = file.getFileSystem(conf);
-        LzoIndex index = LzoIndex.readIndex(fs, file);
-        ((Map)this.indexes.get()).put(file, index);
+//        FileSystem fs = file.getFileSystem(conf);
+//        LzoIndex index = LzoIndex.readIndex(fs, file);
+//        ((Map)this.indexes.get()).put(file, index);
       }
     }
 
     return files.toArray(new FileStatus[] {});
   }
   
-  private LzoIndex getLzoIndex(FileSystem fs, Path file) throws IOException {
-  	LzoIndex index = null;
-      index = LzoIndex.readIndex(fs, file);
-  	return index;
-  }
+	private LzoIndex getLzoIndex(FileSystem fs, Path file) {
+		LzoIndex index = (LzoIndex) ((Map) this.indexes.get()).get(file);
+		if (index == null) {
+			try {
+				index = LzoIndex.readIndex(fs, file);
+				((Map)this.indexes.get()).put(file, index);
+				
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		return index;
+	}
 
   @Override
   protected boolean isSplitable(FileSystem fs, Path filename) {
     if (LzoInputFormatCommon.isLzoFile(filename.toString())) {
-      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(filename);
-      return !index.isEmpty();
+//      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(filename);
+      LzoIndex index = getLzoIndex(fs, filename);
+      return index != null && !index.isEmpty();
     } else {
       // Delegate non-LZO files to the TextInputFormat base class.
       return super.isSplitable(fs, filename);
@@ -139,7 +162,8 @@ public class DeprecatedLzoTextInputFormat extends TextInputFormat {
       }
 
       // LZO file, try to split if the .index file was found
-      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(file);
+//      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(file);
+      LzoIndex index = getLzoIndex(fs, file);
       if (index == null) {
         throw new IOException("Index not found for " + file);
       }

@@ -65,13 +65,21 @@ import com.hadoop.compression.lzo.LzopCodec;
 
 @SuppressWarnings("deprecation")
 public class DeprecatedLzoTextInputFormat extends TextInputFormat {
-  private final Map<Path, LzoIndex> indexes = new HashMap<Path, LzoIndex>();
+//  private final Map<Path, LzoIndex> indexes = new HashMap<Path, LzoIndex>();
+  
+	// ±‹√‚∂‡œﬂ≥ÃÀ¿À¯
+	private final ThreadLocal<Map<Path, LzoIndex>> indexes = new ThreadLocal() {
+		protected Map<Path, LzoIndex> initialValue() {
+			return new HashMap();
+		}
+	};
 
   @Override
   protected FileStatus[] listStatus(JobConf conf) throws IOException {
     List<FileStatus> files = new ArrayList<FileStatus>(Arrays.asList(super.listStatus(conf)));
 
     boolean ignoreNonLzo = LzoInputFormatCommon.getIgnoreNonLzoProperty(conf);
+    
 
     Iterator<FileStatus> it = files.iterator();
     while (it.hasNext()) {
@@ -89,17 +97,23 @@ public class DeprecatedLzoTextInputFormat extends TextInputFormat {
       } else {
         FileSystem fs = file.getFileSystem(conf);
         LzoIndex index = LzoIndex.readIndex(fs, file);
-        indexes.put(file, index);
+        ((Map)this.indexes.get()).put(file, index);
       }
     }
 
     return files.toArray(new FileStatus[] {});
   }
+  
+  private LzoIndex getLzoIndex(FileSystem fs, Path file) throws IOException {
+  	LzoIndex index = null;
+      index = LzoIndex.readIndex(fs, file);
+  	return index;
+  }
 
   @Override
   protected boolean isSplitable(FileSystem fs, Path filename) {
     if (LzoInputFormatCommon.isLzoFile(filename.toString())) {
-      LzoIndex index = indexes.get(filename);
+      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(filename);
       return !index.isEmpty();
     } else {
       // Delegate non-LZO files to the TextInputFormat base class.
@@ -125,7 +139,7 @@ public class DeprecatedLzoTextInputFormat extends TextInputFormat {
       }
 
       // LZO file, try to split if the .index file was found
-      LzoIndex index = indexes.get(file);
+      LzoIndex index = (LzoIndex)((Map)this.indexes.get()).get(file);
       if (index == null) {
         throw new IOException("Index not found for " + file);
       }
